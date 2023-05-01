@@ -2,13 +2,13 @@ cmake_minimum_required(VERSION 3.10)
 
 project(seer CXX)
 
-set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+set(CMAKE_CXX_FLAGS_DEBUG "/MTd")
 set(OPENCV_DIR lib/opencv)
 set(SOURCE_DIR src)
 set(EXECUTABLE seer_executable)
 file(GLOB SOURCE_FILES ${SOURCE_DIR}/*)
 
-find_package(OpenCV REQUIRED PATHS ${OPENCV_DIR}/bin)
+find_package(OpenCV REQUIRED PATHS ${OPENCV_DIR})
 
 add_executable(${EXECUTABLE} ${SOURCE_FILES})
 target_include_directories(${EXECUTABLE} PRIVATE ${SOURCE_DIR} ${OpenCV_INCLUDE_DIRS})
