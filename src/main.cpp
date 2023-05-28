@@ -1,33 +1,37 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/tracking.hpp>
 #include <opencv2/tracking/tracking_legacy.hpp>
+#include <opencv2/video/tracking.hpp>
 #include <opencv2/core/ocl.hpp>
+
+#include "VisionThread.h"
+
+#include <Windows.h>
+#include <synchapi.h>
 
 using namespace cv;
 using namespace std;
 
-// Convert to string
-#define SSTR( x ) static_cast< std::ostringstream & >( \
-( std::ostringstream() << std::dec << x ) ).str()
-
-Ptr<legacy::Tracker> createTracker(const string& name) {
-	Ptr<legacy::Tracker> tracker;
-	if (name == "BOOSTING")
-		tracker = legacy::TrackerBoosting::create();
-	if (name == "MIL")
-		tracker = legacy::TrackerMIL::create();
-	if (name == "KCF")
-		tracker = legacy::TrackerKCF::create();
-	if (name == "TLD")
-		tracker = legacy::TrackerTLD::create();
-	if (name == "MEDIANFLOW")
-		tracker = legacy::TrackerMedianFlow::create();
-	//if (trackerType == "GOTURN")
-	//	tracker = legacy::TrackerGOTURN::create();
-	if (name == "MOSSE")
-		tracker = legacy::TrackerMOSSE::create();
-	if (name == "CSRT")
-		tracker = legacy::TrackerCSRT::create();
+Ptr<Tracker> createTracker(const string& name) {
+	Ptr<Tracker> tracker;
+	if (name == "DaSiamRPN") {
+		tracker = TrackerDaSiamRPN::create();
+	}
+	if (name == "Nano") {
+		TrackerNano::Params params;
+		params.backbone = "assets/nanotrack_backbone_sim.onnx";
+		params.neckhead = "assets/nanotrack_head_sim.onnx";
+		tracker = TrackerNano::create(params);
+	}
+	if (name == "GOTURN") {
+		TrackerGOTURN::Params params;
+		params.modelBin = "assets/goturn.caffemodel";
+		params.modelTxt = "assets/goturn.prototxt";
+		tracker = TrackerGOTURN::create(params);
+	}
+	if (name == "MIL") {
+		tracker = TrackerMIL::create();
+	}
 
 	return tracker;
 }
@@ -40,16 +44,14 @@ void randomColors(vector<Scalar>& colors, int n) {
 }
 
 int main(int argc, char** argv) {
-	// List of tracker types in OpenCV 3.4.1
-	string trackerTypes[8] = { "BOOSTING", "MIL", "KCF", "TLD","MEDIANFLOW", "GOTURN", "MOSSE", "CSRT" };
-	// vector <string> trackerTypes(types, std::end(types));
+	string trackerTypes[] = { "DaSiamRPN", "Nano", "GOTURN", "MIL" };
 
-	int idx = 0;
-	scanf("%d", &idx);
+	int idx = 1;
+	//scanf("%d", &idx);
 	// Create a tracker
 	string trackerType = trackerTypes[idx];
 
-	string filename = "assets/street.mp4";
+	string filename = "assets/test1.mkv";
 
 	// Read video
 	VideoCapture video(filename);
@@ -70,49 +72,26 @@ int main(int argc, char** argv) {
 	bool showCrosshair = true;
 	bool fromCenter = false;
 
-	selectROIs("MultiTracker", frame, bbox, showCrosshair, fromCenter);
-
-	if (bbox.empty()) return 0;
-
-	vector<Scalar> colors;
-	randomColors(colors, bbox.size());
-
-	Ptr<legacy::MultiTracker> tracker = legacy::MultiTracker::create();
-	for (auto& box : bbox) {
-		tracker->add(createTracker(trackerTypes[idx]), frame, Rect2d(box));
+	ColorData* data = (ColorData*)malloc(sizeof(ColorData) * 256 * 256);
+	auto* ptr = data;
+	for (int i = 0; i < 256; i++) {
+		for (int j = 0; j < 256; j++) {
+			ptr->b = 0;
+			//ptr->b = (char)abs(i - j);
+			ptr->g = (char)i;
+			ptr->r = (char)j;
+			ptr++;
+		}
 	}
 
-	while (video.read(frame)) {
-		// Start timer
-		double timer = (double)getTickCount();
 
-		video >> frame;
-		if (frame.empty()) break;
-
-		tracker->update(frame);
-
-		auto& objects = tracker->getObjects();
-		for (int i = 0; i < objects.size(); i++) {
-			rectangle(frame, objects[i], colors[i], 2, 1);
+	for (int j = 0; j < 10; j++) {
+		VisionThread* thread = CreateVisionThread();
+		VisionThreadRun(thread, data, 256, 256);
+		for (int i = 0; i < 60; i++) {
+			VisionThreadUpdate(thread, data, 256 * 256);
+			Sleep(100);
 		}
-
-		// Calculate Frames per second (FPS)
-		float fps = getTickFrequency() / ((double)getTickCount() - timer);
-
-		// Display tracker type on frame
-		putText(frame, trackerType + " Tracker", Point(100, 20), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(50, 170, 50), 2);
-
-		// Display FPS on frame
-		putText(frame, "FPS : " + SSTR(int(fps)), Point(100, 50), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(50, 170, 50), 2);
-
-		// Display frame.
-		imshow("MultiTracker", frame);
-
-		// Exit if ESC pressed.
-		int k = waitKey(1);
-		if (k == 27) {
-			break;
-		}
-
+		DestroyVisionThread(thread);
 	}
 }

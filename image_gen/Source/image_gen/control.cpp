@@ -1,7 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-#include "Components/StaticMeshComponent.h"
 #include "control.h"
+#include "Components/StaticMeshComponent.h"
 
 // Sets default values for this component's properties
 Ucontrol::Ucontrol()
@@ -39,7 +39,7 @@ void Ucontrol::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompone
 	FVector impulse = Direction.GetUnsafeNormal() * ImpulseMultiplier;
 	int count = 0;
 	for (auto* body : bodies) {
-		UE_LOG(LogTemp, Display, TEXT("added impulse to body %d"), count);
+		//UE_LOG(LogTemp, Display, TEXT("added impulse to body %d"), count);
 		body->AddImpulse(impulse);
 		count++;
 	}
