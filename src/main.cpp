@@ -4,6 +4,8 @@
 #include <opencv2/video/tracking.hpp>
 #include <opencv2/core/ocl.hpp>
 
+#include <torch/torch.h>
+
 #include "VisionThread.h"
 
 #include <Windows.h>
@@ -12,66 +14,53 @@
 using namespace cv;
 using namespace std;
 
-Ptr<Tracker> createTracker(const string& name) {
-	Ptr<Tracker> tracker;
-	if (name == "DaSiamRPN") {
-		tracker = TrackerDaSiamRPN::create();
-	}
-	if (name == "Nano") {
-		TrackerNano::Params params;
-		params.backbone = "assets/nanotrack_backbone_sim.onnx";
-		params.neckhead = "assets/nanotrack_head_sim.onnx";
-		tracker = TrackerNano::create(params);
-	}
-	if (name == "GOTURN") {
-		TrackerGOTURN::Params params;
-		params.modelBin = "assets/goturn.caffemodel";
-		params.modelTxt = "assets/goturn.prototxt";
-		tracker = TrackerGOTURN::create(params);
-	}
-	if (name == "MIL") {
-		tracker = TrackerMIL::create();
+struct Model : torch::nn::Module {
+	Model()
+	//: conv1(1, 4, 3)
+	//, conv2(4, 4, 3)
+	: fc0(64, 256)
+	, fc1(256, 256)
+	, fc2(256, 256)
+	, fc3(256, 64)
+	, fc4(64, 1)
+	, sig() {
+		//register_module("conv1", conv1);
+		//register_module("conv2", conv2);
+		register_module("fc0", fc0);
+		register_module("fc1", fc1);
+		register_module("fc2", fc2);
+		register_module("fc3", fc3);
+		register_module("fc4", fc4);
+		register_module("sig", sig);
 	}
 
-	return tracker;
-}
-
-void randomColors(vector<Scalar>& colors, int n) {
-	RNG rng(0);
-	for (int i = 0; i < n; i++) {
-		colors.push_back(Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255)));
+	torch::Tensor forward(torch::Tensor x) {
+		//x = torch::relu(conv1->forward(x));
+		//x = torch::relu(conv2->forward(x));
+		//x = x.view({-1, 256});
+		//
+		x = torch::flatten(x);
+		x = torch::relu(fc0->forward(x));
+		x = torch::relu(fc1->forward(x));
+		x = torch::relu(fc2->forward(x));
+		x = torch::relu(fc3->forward(x));
+		x = fc4->forward(x);
+		x = sig->forward(x);
+		return x;
 	}
-}
+
+	//torch::nn::Conv2d conv1;
+	//torch::nn::Conv2d conv2;
+	torch::nn::Linear fc0;
+	torch::nn::Linear fc1;
+	torch::nn::Linear fc2;
+	torch::nn::Linear fc3;
+	torch::nn::Linear fc4;
+	torch::nn::Sigmoid sig;
+};
 
 int main(int argc, char** argv) {
-	string trackerTypes[] = { "DaSiamRPN", "Nano", "GOTURN", "MIL" };
-
-	int idx = 1;
-	//scanf("%d", &idx);
-	// Create a tracker
-	string trackerType = trackerTypes[idx];
-
-	string filename = "assets/test1.mkv";
-
-	// Read video
-	VideoCapture video(filename);
-
-	// Exit if video is not opened
-	if (!video.isOpened()) {
-		cout << "Could not read video file" << endl;
-		return 1;
-	}
-
-	// Read first frame
-	Mat frame;
-	bool ok = video.read(frame);
-
-	// Define initial bounding box
-	vector<Rect> bbox;
-
-	bool showCrosshair = true;
-	bool fromCenter = false;
-
+	/*
 	ColorData* data = (ColorData*)malloc(sizeof(ColorData) * 256 * 256);
 	auto* ptr = data;
 	for (int i = 0; i < 256; i++) {
@@ -83,15 +72,71 @@ int main(int argc, char** argv) {
 			ptr++;
 		}
 	}
+	*/
 
+	if (torch::cuda::is_available()) {
+		cout << "cuda available\n\n";
+	}
 
+	Model model;
+	torch::optim::SGD optimizer(model.parameters(), 0.1);
+
+	for (int epoch = 0; epoch < 50; epoch++) {
+		torch::Tensor loss, target, pred;
+		for (int batch = 0; batch < 128; batch++) {
+			optimizer.zero_grad();
+
+			torch::Tensor data = torch::rand({8, 8});
+			int count = 0;
+			for (int i = 0; i < 8; i++) {
+				for (int j = 0; j < 8; j++) {
+					double d = data[i][j].item<double>() > 0.5 ? 1.0 : 0.0;
+					data[i][j] = d;
+					count += d == 1.0;
+				}
+			}
+
+			target = torch::tensor(vector(1, count < 32 ? 0.0 : 1.0));
+			pred = model.forward(data);
+
+			loss = torch::binary_cross_entropy(pred, target);
+			loss.backward();
+			optimizer.step();
+		}
+
+		cout << "\nEpoch: " << epoch << " loss: " << loss.item<float>() << endl;
+		cout << "\ntarget: " << target << "\n\nprediction: " << pred << endl;
+	}
+
+	int correct = 0;
+	for (int batch = 0; batch < 128; batch++) {
+		torch::Tensor data = torch::rand({8, 8});
+		int count = 0;
+		for (int i = 0; i < 8; i++) {
+			for (int j = 0; j < 8; j++) {
+				double d = data[i][j].item<double>() > 0.5 ? 1.0 : 0.0;
+				data[i][j] = d;
+				count += d == 1.0;
+			}
+		}
+
+		double target = count < 32 ? 0.0 : 1.0;
+		auto pred = model.forward(data);
+		double intermediate = pred[0].item<double>() > 0.5 ? 1.0 : 0.0;
+		correct += intermediate == target;
+	}
+
+	double acc = correct / 128.0;
+	cout << "accuracy: " << acc << endl;
+
+	/*
 	for (int j = 0; j < 10; j++) {
 		VisionThread* thread = CreateVisionThread();
 		VisionThreadRun(thread, data, 256, 256);
-		for (int i = 0; i < 60; i++) {
+		for (int i = 0; i < 10; i++) {
 			VisionThreadUpdate(thread, data, 256 * 256);
 			Sleep(100);
 		}
 		DestroyVisionThread(thread);
-	}
+	} */
 }

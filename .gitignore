@@ -4,4 +4,4 @@ CMakeCache*
 CMakeFiles*
 image_gen/*
 !image_gen/Source
-
+lib/torch/*
