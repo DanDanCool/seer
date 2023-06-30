@@ -8,7 +8,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "/MDd /Z7")
 set(CMAKE_CXX_FLAGS_RELEASE "/MD")
 
 set(OPENCV_DIR lib/opencv)
-set(TORCH_DIR lib/torch/debug)
+set(TORCH_DIR lib/torch/release)
 
 set(SOURCE_DIR src)
 set(EXECUTABLE seer_executable)

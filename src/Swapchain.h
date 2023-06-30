@@ -6,6 +6,8 @@
 
 #include <Windows.h>
 
+#include "VisionThread.h"
+
 const int FRAME_COUNT = 2;
 
 struct Semaphore {
@@ -38,9 +40,10 @@ struct Semaphore {
 	}
 };
 
-struct FrameView {
-	cv::Mat& frame;
-	std::mutex& lock;
+struct Frame {
+	cv::Mat frame;
+	std::vector<BBoxData> bbox;
+	std::mutex lock;
 };
 
 class Swapchain {
@@ -57,7 +60,7 @@ public:
 
 	void Init(int x, int y) {
 		for (int i = 0; i < FRAME_COUNT; i++) {
-			_Frames[i].create(x, y, CV_8UC3);
+			_Frames[i].frame.create(x, y, CV_8UC3);
 		}
 	}
 
@@ -66,9 +69,9 @@ public:
 		_Signals[1].Release();
 	}
 
-	FrameView Present() {
+	Frame& Present() {
 		int idx = _Present.load(std::memory_order_acquire);
-		return FrameView{_Frames[idx], _Locks[idx]};
+		return _Frames[idx];
 	}
 
 	void SwapBuffers() {
@@ -77,12 +80,12 @@ public:
 		_Signals[!idx].Acquire();
 	}
 
-	FrameView Acquire() {
+	Frame& Acquire() {
 		int idx = _BackIndex.load(std::memory_order_acquire);
-		return FrameView{_Frames[idx], _Locks[idx]};
+		return _Frames[idx];
 	}
 
-	void Submit(cv::Mat& frame) {
+	void Submit(Frame& frame) {
 		int idx = _BackIndex.load(std::memory_order_acquire);
 		assert(&_Frames[idx] == &frame);
 		_BackIndex.store(!idx, std::memory_order_release);
@@ -90,8 +93,7 @@ public:
 	}
 
 private:
-	cv::Mat _Frames[FRAME_COUNT];
-	std::mutex _Locks[FRAME_COUNT];
+	Frame _Frames[FRAME_COUNT];
 	Semaphore _Signals[FRAME_COUNT];
 	std::atomic<int> _BackIndex;
 	std::atomic<int> _Present;

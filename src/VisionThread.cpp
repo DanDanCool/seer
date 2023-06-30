@@ -19,15 +19,15 @@ public:
 		Await();
 	}
 
-	void NextFrame(ColorData* data, int size) {
-		if (size != _Size) return;
+	void NextFrame(FrameData* data) {
+		if (data->csize != _Size) return;
 		ReadData(data);
 	}
 
-	void Run(ColorData* data, int x, int y) {
+	void Run(FrameData* data) {
 		_Run.store(true, std::memory_order_release);
-		_Size = x * y;
-		_Swapchain.Init(x, y);
+		_Size = data->fw * data->fh;
+		_Swapchain.Init(data->fw, data->fh);
 
 		ReadData(data);
 
@@ -49,7 +49,7 @@ public:
 
 private:
 	void Task();
-	void ReadData(ColorData* data);
+	void ReadData(FrameData* data);
 
 	std::thread _Thread;
 
@@ -77,12 +77,12 @@ void DestroyVisionThread(VisionThread* t) {
 	delete t;
 }
 
-void VisionThreadUpdate(VisionThread* t, ColorData* data, int size) {
-	return t->NextFrame(data, size);
+void VisionThreadUpdate(VisionThread* t, FrameData* data) {
+	return t->NextFrame(data);
 }
 
-void VisionThreadRun(VisionThread* t, ColorData* data, int x, int y) {
-	t->Run(data, x, y);
+void VisionThreadRun(VisionThread* t, FrameData* data) {
+	t->Run(data);
 }
 
 void VisionThreadStop(VisionThread* t) {
@@ -114,10 +114,20 @@ void VisionThread::Task() {
 		double now = (double)getTickCount();
 
 		{
-			auto& [frame, lock] = _Swapchain.Present();
-			std::lock_guard l(lock);
+			auto& f = _Swapchain.Present();
+			std::lock_guard l(f.lock);
+
+			auto& frame = f.frame;
 
 			float fps = getTickFrequency() / (now - timer);
+
+			if (!f.bbox.empty()) {
+				BBoxData& bbox = f.bbox[0];
+				Point p1(frame.cols * ((bbox.x0 + 1.0) / 2.0), frame.rows * ((-bbox.y0 + 1.0) / 2.0));
+				Point p2(frame.cols * ((bbox.x1 + 1.0) / 2.0), frame.rows * ((-bbox.y1 + 1.0) / 2.0));
+				rectangle(frame, p1, p2, Scalar(0, 0, 256), 2);
+			}
+
 			putText(frame, "FPS : " + to_string((int)fps), Point(100, 20), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(50, 170, 50), 2);
 			imshow(_Window, frame);
 
@@ -137,20 +147,29 @@ void VisionThread::Task() {
 	_Finished.store(true, std::memory_order_release);
 }
 
-void VisionThread::ReadData(ColorData* data) {
+void VisionThread::ReadData(FrameData* data) {
 	if (!data) return;
 
-	auto& [frame, lock] = _Swapchain.Acquire();
-	std::lock_guard l(lock);
+	Frame& frame = _Swapchain.Acquire();
+	std::lock_guard l(frame.lock);
+	auto& m = frame.frame;
 
-	for (int i = 0; i < frame.rows; i++) {
-		for (int j = 0; j < frame.cols; j++) {
-			uchar* ptr = frame.ptr(i, j);
-			ptr[0] = data->b;
-			ptr[1] = data->g;
-			ptr[2] = data->r;
-			data++;
+	ColorData* cdata = data->cdata;
+
+	for (int i = 0; i < m.rows; i++) {
+		for (int j = 0; j < m.cols; j++) {
+			uchar* ptr = m.ptr(i, j);
+			ptr[0] = cdata->b;
+			ptr[1] = cdata->g;
+			ptr[2] = cdata->r;
+			cdata++;
 		}
+	}
+
+	auto& bbox = frame.bbox;
+	bbox.clear();
+	for (int i = 0; i < data->bsize; i++) {
+		bbox.push_back(data->bdata[i]);
 	}
 
 	_Swapchain.Submit(frame);

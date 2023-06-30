@@ -15,7 +15,13 @@ class IMAGE_GEN_API Ucapture : public USceneCaptureComponent2D
 {
 	GENERATED_BODY()
 
+	UPROPERTY(EditAnywhere)
+	TObjectPtr<AActor> CapturedActor;
+
 	SeerProxy _Proxy;
+
+	TArray<FColor> pixels;
+	TArray<FVector4f> boxes;
 
 public:	
 	// Sets default values for this component's properties

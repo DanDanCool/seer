@@ -18,20 +18,16 @@ struct Model : torch::nn::Module {
 	Model()
 	//: conv1(1, 4, 3)
 	//, conv2(4, 4, 3)
-	: fc0(64, 256)
-	, fc1(256, 256)
+	: fc1(64, 256)
 	, fc2(256, 256)
 	, fc3(256, 64)
-	, fc4(64, 1)
-	, sig() {
+	, fc4(64, 1) {
 		//register_module("conv1", conv1);
 		//register_module("conv2", conv2);
-		register_module("fc0", fc0);
 		register_module("fc1", fc1);
 		register_module("fc2", fc2);
 		register_module("fc3", fc3);
 		register_module("fc4", fc4);
-		register_module("sig", sig);
 	}
 
 	torch::Tensor forward(torch::Tensor x) {
@@ -40,29 +36,25 @@ struct Model : torch::nn::Module {
 		//x = x.view({-1, 256});
 		//
 		x = torch::flatten(x);
-		x = torch::relu(fc0->forward(x));
 		x = torch::relu(fc1->forward(x));
 		x = torch::relu(fc2->forward(x));
 		x = torch::relu(fc3->forward(x));
 		x = fc4->forward(x);
-		x = sig->forward(x);
+		x = torch::sigmoid(x);
 		return x;
 	}
 
 	//torch::nn::Conv2d conv1;
 	//torch::nn::Conv2d conv2;
-	torch::nn::Linear fc0;
 	torch::nn::Linear fc1;
 	torch::nn::Linear fc2;
 	torch::nn::Linear fc3;
 	torch::nn::Linear fc4;
-	torch::nn::Sigmoid sig;
 };
 
 int main(int argc, char** argv) {
-	/*
-	ColorData* data = (ColorData*)malloc(sizeof(ColorData) * 256 * 256);
-	auto* ptr = data;
+	ColorData* pixeldata = (ColorData*)malloc(sizeof(ColorData) * 256 * 256);
+	auto* ptr = pixeldata;
 	for (int i = 0; i < 256; i++) {
 		for (int j = 0; j < 256; j++) {
 			ptr->b = 0;
@@ -72,16 +64,15 @@ int main(int argc, char** argv) {
 			ptr++;
 		}
 	}
-	*/
 
 	if (torch::cuda::is_available()) {
 		cout << "cuda available\n\n";
 	}
 
-	Model model;
+	/*
 	torch::optim::SGD optimizer(model.parameters(), 0.1);
 
-	for (int epoch = 0; epoch < 50; epoch++) {
+	for (int epoch = 0; epoch < 100; epoch++) {
 		torch::Tensor loss, target, pred;
 		for (int batch = 0; batch < 128; batch++) {
 			optimizer.zero_grad();
@@ -104,8 +95,8 @@ int main(int argc, char** argv) {
 			optimizer.step();
 		}
 
-		cout << "\nEpoch: " << epoch << " loss: " << loss.item<float>() << endl;
-		cout << "\ntarget: " << target << "\n\nprediction: " << pred << endl;
+		//cout << "\nEpoch: " << epoch << " loss: " << loss.item<float>() << endl;
+		//cout << "\ntarget: " << target << "\n\nprediction: " << pred << endl;
 	}
 
 	int correct = 0;
@@ -128,15 +119,26 @@ int main(int argc, char** argv) {
 
 	double acc = correct / 128.0;
 	cout << "accuracy: " << acc << endl;
+	*/
 
-	/*
+	BBoxData bbox = { -0.5, 0.5, 0.5, -0.5 };
+
 	for (int j = 0; j < 10; j++) {
 		VisionThread* thread = CreateVisionThread();
-		VisionThreadRun(thread, data, 256, 256);
+
+		FrameData data = {};
+		data.cdata = pixeldata;
+		data.bdata = &bbox;
+		data.csize = 256 * 256;
+		data.bsize = 1;
+		data.fw = 256;
+		data.fh = 256;
+
+		VisionThreadRun(thread, &data);
 		for (int i = 0; i < 10; i++) {
-			VisionThreadUpdate(thread, data, 256 * 256);
+			VisionThreadUpdate(thread, &data);
 			Sleep(100);
 		}
 		DestroyVisionThread(thread);
-	} */
+	}
 }
