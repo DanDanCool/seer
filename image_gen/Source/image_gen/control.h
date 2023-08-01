@@ -19,9 +19,9 @@ class IMAGE_GEN_API Ucontrol : public UActorComponent
 	float ImpulseMultiplier;
 
 	UPROPERTY(EditAnywhere)
-		FVector Direction;
+	FVector Direction;
 
-public:	
+public:
 	// Sets default values for this component's properties
 	Ucontrol();
 
@@ -29,9 +29,9 @@ protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
 
-public:	
+public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-		
+
 };

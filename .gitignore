@@ -4,4 +4,8 @@ CMakeCache*
 CMakeFiles*
 image_gen/*
 !image_gen/Source
+!image_gen/Plugins/
+image_gen/Plugins/*/Intermediate
+image_gen/Plugins/*/Binaries
+!image_gen/image_gen.uproject
 lib/torch/*

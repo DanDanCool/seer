@@ -1,56 +1,83 @@
-#include <opencv2/opencv.hpp>
-#include <opencv2/tracking.hpp>
-#include <opencv2/tracking/tracking_legacy.hpp>
-#include <opencv2/video/tracking.hpp>
-#include <opencv2/core/ocl.hpp>
-
-#include <torch/torch.h>
-
-#include "VisionThread.h"
-
 #include <Windows.h>
 #include <synchapi.h>
+#include <torch/torch.h>
 
-using namespace cv;
+#include <opencv2/core.hpp>
+#include <opencv2/videoio.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+
+#include <string>
+
+#include "VisionThread.h"
+#include "BBoxWriter.h"
+
 using namespace std;
+using namespace cv;
 
-struct Model : torch::nn::Module {
-	Model()
-	//: conv1(1, 4, 3)
-	//, conv2(4, 4, 3)
-	: fc1(64, 256)
-	, fc2(256, 256)
-	, fc3(256, 64)
-	, fc4(64, 1) {
-		//register_module("conv1", conv1);
-		//register_module("conv2", conv2);
-		register_module("fc1", fc1);
-		register_module("fc2", fc2);
-		register_module("fc3", fc3);
-		register_module("fc4", fc4);
+struct ModelImpl : torch::nn::SequentialImpl {
+	ModelImpl() {
+		using namespace torch::nn;
+		auto stride = torch::ExpandingArray<2>({2, 2});
+		auto shape = torch::ExpandingArray<2>({-1, 128 * 7 * 7});
+		push_back(Conv2d(Conv2dOptions(3, 64, 7).stride(2).padding(2)));
+		push_back(Functional(torch::relu));
+		push_back(Functional(torch::max_pool2d, 3, stride, 0, 1, false));
+		push_back(Conv2d(Conv2dOptions(64, 128, 5).padding(2)));
+		push_back(Functional(torch::relu));
+		push_back(Functional(torch::max_pool2d, 3, stride, 0, 1, false));
+		push_back(Conv2d(Conv2dOptions(128, 192, 3).padding(1)));
+		push_back(Functional(torch::max_pool2d, 3, stride, 0, 1, false));
+		push_back(Functional(torch::relu));
+		push_back(Conv2d(Conv2dOptions(192, 192, 3).padding(1)));
+		push_back(Functional(torch::relu));
+		push_back(Conv2d(Conv2dOptions(192, 128, 3).padding(1)));
+		push_back(Functional(torch::relu));
+		push_back(Conv2d(Conv2dOptions(128, 128, 3).padding(1)));
+		push_back(Functional(torch::relu));
+		push_back(Functional(torch::max_pool2d, 3, stride, 0, 1, false));
+		push_back(Functional(torch::reshape, shape));
+		push_back(Dropout());
+		push_back(Linear(128 * 7 * 7, 2048));
+		push_back(Functional(torch::relu));
+		push_back(Dropout());
+		push_back(Linear(2048, 2048));
+		push_back(Functional(torch::relu));
+		push_back(Linear(2048, 512));
+		push_back(Functional(torch::relu));
+		push_back(Linear(512, 4));
 	}
-
-	torch::Tensor forward(torch::Tensor x) {
-		//x = torch::relu(conv1->forward(x));
-		//x = torch::relu(conv2->forward(x));
-		//x = x.view({-1, 256});
-		//
-		x = torch::flatten(x);
-		x = torch::relu(fc1->forward(x));
-		x = torch::relu(fc2->forward(x));
-		x = torch::relu(fc3->forward(x));
-		x = fc4->forward(x);
-		x = torch::sigmoid(x);
-		return x;
-	}
-
-	//torch::nn::Conv2d conv1;
-	//torch::nn::Conv2d conv2;
-	torch::nn::Linear fc1;
-	torch::nn::Linear fc2;
-	torch::nn::Linear fc3;
-	torch::nn::Linear fc4;
 };
+TORCH_MODULE(Model);
+
+static BBoxData train(Model& model, torch::optim::Optimizer& optimizer, cv::Mat& frame, BBoxData& bbox) {
+	std::vector<cv::Mat> channels(3);
+	cv::split(frame, channels);
+
+	auto R = torch::from_blob(channels[2].ptr(), {frame.rows, frame.cols}, torch::kUInt8);
+	auto G = torch::from_blob(channels[1].ptr(), {frame.rows, frame.cols}, torch::kUInt8);
+	auto B = torch::from_blob(channels[0].ptr(), {frame.rows, frame.cols}, torch::kUInt8);
+
+	auto data = torch::cat({R, G, B}).view({3, frame.rows, frame.cols}).to(torch::kFloat);
+	auto target = torch::from_blob((void*)&bbox, {1, 4}, torch::kFloat);
+
+	auto output = model->forward(data);
+	auto loss = torch::mse_loss(output, target);
+
+	optimizer.zero_grad();
+	loss.backward();
+	optimizer.step();
+
+	auto shape = output.sizes();
+
+	auto access = output.accessor<float, 2>();
+	BBoxData out;
+	out.x0 = access[0][0];
+	out.y0 = access[0][1];
+	out.x1 = access[0][2];
+	out.y1 = access[0][3];
+	return out;
+}
 
 int main(int argc, char** argv) {
 	ColorData* pixeldata = (ColorData*)malloc(sizeof(ColorData) * 256 * 256);
@@ -65,65 +92,43 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	if (torch::cuda::is_available()) {
-		cout << "cuda available\n\n";
+	BBoxData bbox = { -0.5, 0.5, 0.5, -0.5 };
+
+	Model model;
+	torch::optim::SGD optimizer(model->parameters(), 0.01);
+
+	Mat frame;
+	vector<BBoxData> boxes;
+
+	VideoCapture capture("assets/tracker3560.mp4");
+	BBoxReader reader("assets/tracker3560.bbox");
+	while (capture.isOpened()) {
+		capture.read(frame);
+		if (frame.empty()) break;
+		boxes.clear();
+		reader.Read(boxes);
+
+		//BBoxData prediction = train(model, optimizer, frame, bbox);
+		BBoxData& bbox = boxes[0];
+		Point p1(frame.cols * ((bbox.x0 + 1.0) / 2.0), frame.rows * ((-bbox.y0 + 1.0) / 2.0));
+		Point p2(frame.cols * ((bbox.x1 + 1.0) / 2.0), frame.rows * ((-bbox.y1 + 1.0) / 2.0));
+		rectangle(frame, p1, p2, Scalar(0, 256, 0), 2);
+
+		BBoxData prediction = train(model, optimizer, frame, bbox);
+		Point p3(frame.cols * ((prediction.x0 + 1.0) / 2.0), frame.rows * ((-prediction.y0 + 1.0) / 2.0));
+		Point p4(frame.cols * ((prediction.x1 + 1.0) / 2.0), frame.rows * ((-prediction.y1 + 1.0) / 2.0));
+		rectangle(frame, p3, p4, Scalar(0, 0, 256), 2);
+
+		imshow("bbox", frame);
+
+		int k = waitKey(1);
+		if (k == 27) {
+			break;
+		}
 	}
 
 	/*
-	torch::optim::SGD optimizer(model.parameters(), 0.1);
-
-	for (int epoch = 0; epoch < 100; epoch++) {
-		torch::Tensor loss, target, pred;
-		for (int batch = 0; batch < 128; batch++) {
-			optimizer.zero_grad();
-
-			torch::Tensor data = torch::rand({8, 8});
-			int count = 0;
-			for (int i = 0; i < 8; i++) {
-				for (int j = 0; j < 8; j++) {
-					double d = data[i][j].item<double>() > 0.5 ? 1.0 : 0.0;
-					data[i][j] = d;
-					count += d == 1.0;
-				}
-			}
-
-			target = torch::tensor(vector(1, count < 32 ? 0.0 : 1.0));
-			pred = model.forward(data);
-
-			loss = torch::binary_cross_entropy(pred, target);
-			loss.backward();
-			optimizer.step();
-		}
-
-		//cout << "\nEpoch: " << epoch << " loss: " << loss.item<float>() << endl;
-		//cout << "\ntarget: " << target << "\n\nprediction: " << pred << endl;
-	}
-
-	int correct = 0;
-	for (int batch = 0; batch < 128; batch++) {
-		torch::Tensor data = torch::rand({8, 8});
-		int count = 0;
-		for (int i = 0; i < 8; i++) {
-			for (int j = 0; j < 8; j++) {
-				double d = data[i][j].item<double>() > 0.5 ? 1.0 : 0.0;
-				data[i][j] = d;
-				count += d == 1.0;
-			}
-		}
-
-		double target = count < 32 ? 0.0 : 1.0;
-		auto pred = model.forward(data);
-		double intermediate = pred[0].item<double>() > 0.5 ? 1.0 : 0.0;
-		correct += intermediate == target;
-	}
-
-	double acc = correct / 128.0;
-	cout << "accuracy: " << acc << endl;
-	*/
-
-	BBoxData bbox = { -0.5, 0.5, 0.5, -0.5 };
-
-	for (int j = 0; j < 10; j++) {
+	for (int j = 0; j < 1; j++) {
 		VisionThread* thread = CreateVisionThread();
 
 		FrameData data = {};
@@ -135,10 +140,10 @@ int main(int argc, char** argv) {
 		data.fh = 256;
 
 		VisionThreadRun(thread, &data);
-		for (int i = 0; i < 10; i++) {
+		for (int i = 0; i < 100; i++) {
 			VisionThreadUpdate(thread, &data);
-			Sleep(100);
+			Sleep(10);
 		}
 		DestroyVisionThread(thread);
-	}
+	}*/
 }

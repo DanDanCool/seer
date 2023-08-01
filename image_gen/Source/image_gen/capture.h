@@ -23,7 +23,9 @@ class IMAGE_GEN_API Ucapture : public USceneCaptureComponent2D
 	TArray<FColor> pixels;
 	TArray<FVector4f> boxes;
 
-public:	
+	bool bRecord;
+
+public:
 	// Sets default values for this component's properties
 	Ucapture();
 
@@ -31,9 +33,9 @@ protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
 
-public:	
+public:
 	// Called every frame
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-		
+
 };

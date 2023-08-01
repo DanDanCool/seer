@@ -59,8 +59,10 @@ public:
 	}
 
 	void Init(int x, int y) {
+		Width = x;
+		Height = y;
 		for (int i = 0; i < FRAME_COUNT; i++) {
-			_Frames[i].frame.create(x, y, CV_8UC3);
+			_Frames[i].frame.create(y, x, CV_8UC3);
 		}
 	}
 
@@ -92,6 +94,7 @@ public:
 		_Signals[idx].Release();
 	}
 
+	int Width, Height;
 private:
 	Frame _Frames[FRAME_COUNT];
 	Semaphore _Signals[FRAME_COUNT];

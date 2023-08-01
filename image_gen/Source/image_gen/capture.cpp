@@ -3,6 +3,7 @@
 
 #include "capture.h"
 #include "CoreFwd.h"
+#include "Editor.h"
 
 // Sets default values for this component's properties
 Ucapture::Ucapture()
@@ -21,6 +22,7 @@ void Ucapture::BeginPlay()
 	Super::BeginPlay();
 
 	// ...
+	bRecord = GEditor->IsPlaySessionInProgress();
 }
 
 
@@ -37,7 +39,7 @@ void Ucapture::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompone
 		UE_LOG(LogTemp, Display, TEXT("reading pixels failed"));
 	}
 
-	if (!CapturedActor) return;
+	if (!CapturedActor || !bRecord) return;
 
 	FMinimalViewInfo viewinfo;
 	GetCameraView(DeltaTime, viewinfo);
@@ -67,14 +69,24 @@ void Ucapture::TickComponent(float DeltaTime, ELevelTick TickType, FActorCompone
 	xvals.Sort();
 	yvals.Sort();
 
-	FVector4f bbox;
-	bbox.X = xvals[0];
-	bbox.Y = yvals[0];
-	bbox.Z = xvals[7];
-	bbox.W = yvals[7];
-
 	boxes.Empty();
-	boxes.Add(bbox);
+	/*
+	for (int i = 0; i < 4; i += 2) {
+		FVector4f bbox;
+		bbox.X = xvals[0 + i];
+		bbox.Y = yvals[0 + i];
+		bbox.Z = xvals[7 - i];
+		bbox.W = yvals[7 - i];
+		boxes.Add(bbox);
+	} */
+
+	FVector4f avg;
+	avg.X = (xvals[0] + xvals[2]) / 2;
+	avg.Y = (yvals[0] + yvals[2]) / 2;
+	avg.Z = (xvals[7] + xvals[5]) / 2;
+	avg.W = (yvals[7] + yvals[5]) / 2;
+	boxes.Add(avg);
+
 
 	if (!_Proxy.IsRunning()) {
 		_Proxy.Run(pixels, boxes, TextureTarget->SizeX, TextureTarget->SizeY);

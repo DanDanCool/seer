@@ -17,7 +17,8 @@ set(LIBRARY seer_lib)
 find_package(OpenCV REQUIRED PATHS ${OPENCV_DIR}/bin)
 find_package(Torch REQUIRED PATHS ${TORCH_DIR}/share/cmake/Torch)
 
-add_library(${LIBRARY} SHARED ${SOURCE_DIR}/VisionThread.h ${SOURCE_DIR}/Swapchain.h ${SOURCE_DIR}/VisionThread.cpp)
+add_library(${LIBRARY} SHARED ${SOURCE_DIR}/VisionThread.h ${SOURCE_DIR}/Swapchain.h ${SOURCE_DIR}/VisionThread.cpp
+	${SOURCE_DIR}/BBoxWriter.h)
 target_include_directories(${LIBRARY} PRIVATE ${SOURCE_DIR} ${OpenCV_INCLUDE_DIRS})
 
 target_link_libraries(${LIBRARY} PRIVATE ${OpenCV_LIBS})
@@ -27,7 +28,7 @@ target_compile_definitions(${LIBRARY} PRIVATE SEER_EXPORT)
 add_executable(${EXECUTABLE} ${SOURCE_DIR}/main.cpp)
 target_include_directories(${EXECUTABLE} PRIVATE ${SOURCE_DIR} ${OpenCV_INCLUDE_DIRS} ${TORCH_INCLUDE_DIRS})
 
-target_link_libraries(${EXECUTABLE} PRIVATE ${OpenCV_LIBS} ${TORCH_LIBRARIES} ${LIBRARY})
+target_link_libraries(${EXECUTABLE} PRIVATE ${LIBRARY} ${OpenCV_LIBS} ${TORCH_LIBRARIES})
 target_compile_features(${EXECUTABLE} PRIVATE cxx_std_17)
 
 if (MSVC)
@@ -37,6 +38,21 @@ if (MSVC)
                      COMMAND ${CMAKE_COMMAND} -E copy_if_different
                      ${TORCH_DLLS}
 					 $<TARGET_FILE_DIR:${EXECUTABLE}>)
+
+  cmake_path(SET BINARY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/image_gen/Plugins/seer/Binaries/Win64")
+  #  add_custom_command(TARGET ${LIBRARY} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different ${TORCH_DLLS}
+  #	  ${BINARY_PATH})
+
+ file(GLOB SEER_DLLS "${CMAKE_CURRENT_BINARY_DIR}/Release/seer*.dll"
+	 "${CMAKE_CURRENT_BINARY_DIR}/Release/seer*.lib" "${CMAKE_CURRENT_BINARY_DIR}/Release/seer*.exp")
+  cmake_path(SET PLUGIN_PATH "${CMAKE_CURRENT_SOURCE_DIR}/image_gen/Plugins/seer/Binaries/ThirdParty/Win64")
+
+  add_custom_command(TARGET ${LIBRARY} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SEER_DLLS} ${PLUGIN_PATH})
+
+  cmake_path(SET ASSET_PATH "${CMAKE_CURRENT_BINARY_DIR}/assets")
+  file(GLOB ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/assets/*")
+  add_custom_command(TARGET ${EXECUTABLE} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ASSETS}
+	  ${ASSET_PATH})
 endif (MSVC)
 
-file(COPY assets DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/Debug)
+execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets)

@@ -33,7 +33,7 @@ struct FrameData {
 
 class VisionThread;
 
-SEER_API int TestLoadFunction(int in);
+SEER_API int SEERTestLoadFunction(int in);
 
 SEER_API VisionThread* CreateVisionThread();
 SEER_API void DestroyVisionThread(VisionThread* t);

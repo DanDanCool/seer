@@ -1,5 +1,6 @@
 #include "VisionThread.h"
 #include "Swapchain.h"
+#include "BBoxWriter.h"
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -62,12 +63,6 @@ private:
 	std::string _Window;
 };
 
-int TestLoadFunction(int in) {
-	printf("hello %d\n", in);
-
-	return 1;
-}
-
 
 VisionThread* CreateVisionThread() {
 	return new VisionThread();
@@ -99,8 +94,12 @@ void VisionThreadAwait(VisionThread* t) {
 #include <opencv2/core/ocl.hpp>
 #include <sstream>
 
-using namespace cv;
+int SEERTestLoadFunction(int in) {
+	return 7;
+}
+
 using namespace std;
+using namespace cv;
 
 void VisionThread::Task() {
 	stringstream str;
@@ -110,25 +109,34 @@ void VisionThread::Task() {
 	bool run = _Run.load(memory_order_relaxed);
 
 	double timer = (double)getTickCount();
+	RNG rng;
+	Scalar color(Scalar(rng.uniform(0, 256), rng.uniform(0, 256), rng.uniform(0, 256)));
+
+	string save_directory = "C:\\Users\\sunda\\Documents\\dev\\seer\\assets\\";
+	VideoWriter writer(save_directory + _Window + ".mp4", VideoWriter::fourcc('H', '2', '6', '4'), 60, {_Swapchain.Width, _Swapchain.Height});
+	BBoxWriter bwriter(save_directory + _Window + ".bbox");
 	while (run) {
 		double now = (double)getTickCount();
-
 		{
 			auto& f = _Swapchain.Present();
 			std::lock_guard l(f.lock);
 
 			auto& frame = f.frame;
 
-			float fps = getTickFrequency() / (now - timer);
+			writer.write(frame);
+			bwriter.Write(f.bbox);
 
+			/*
 			if (!f.bbox.empty()) {
-				BBoxData& bbox = f.bbox[0];
+				auto& bbox = f.bbox[0];
 				Point p1(frame.cols * ((bbox.x0 + 1.0) / 2.0), frame.rows * ((-bbox.y0 + 1.0) / 2.0));
 				Point p2(frame.cols * ((bbox.x1 + 1.0) / 2.0), frame.rows * ((-bbox.y1 + 1.0) / 2.0));
-				rectangle(frame, p1, p2, Scalar(0, 0, 256), 2);
+				rectangle(frame, p1, p2, color, 1);
 			}
 
+			float fps = getTickFrequency() / (now - timer);
 			putText(frame, "FPS : " + to_string((int)fps), Point(100, 20), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(50, 170, 50), 2);
+			*/
 			imshow(_Window, frame);
 
 			// Exit if ESC pressed.
@@ -143,6 +151,7 @@ void VisionThread::Task() {
 		_Swapchain.SwapBuffers();
 	}
 
+	writer.release();
 	destroyWindow(_Window);
 	_Finished.store(true, std::memory_order_release);
 }
