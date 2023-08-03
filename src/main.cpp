@@ -8,6 +8,10 @@
 #include <opencv2/imgproc.hpp>
 
 #include <string>
+#include <filesystem>
+#include <utility>
+#include <algorithm>
+#include <random>
 
 #include "VisionThread.h"
 #include "BBoxWriter.h"
@@ -50,7 +54,7 @@ struct ModelImpl : torch::nn::SequentialImpl {
 };
 TORCH_MODULE(Model);
 
-static BBoxData train(Model& model, torch::optim::Optimizer& optimizer, cv::Mat& frame, BBoxData& bbox) {
+static pair<BBoxData, float> train(Model& model, torch::optim::Optimizer& optimizer, cv::Mat& frame, BBoxData& bbox) {
 	std::vector<cv::Mat> channels(3);
 	cv::split(frame, channels);
 
@@ -76,8 +80,35 @@ static BBoxData train(Model& model, torch::optim::Optimizer& optimizer, cv::Mat&
 	out.y0 = access[0][1];
 	out.x1 = access[0][2];
 	out.y1 = access[0][3];
-	return out;
+	return make_pair(out, loss.item<float>());
 }
+
+static pair<BBoxData, float> test(Model& model, cv::Mat& frame, BBoxData& bbox) {
+	std::vector<cv::Mat> channels(3);
+	cv::split(frame, channels);
+
+	auto R = torch::from_blob(channels[2].ptr(), {frame.rows, frame.cols}, torch::kUInt8);
+	auto G = torch::from_blob(channels[1].ptr(), {frame.rows, frame.cols}, torch::kUInt8);
+	auto B = torch::from_blob(channels[0].ptr(), {frame.rows, frame.cols}, torch::kUInt8);
+
+	auto data = torch::cat({R, G, B}).view({3, frame.rows, frame.cols}).to(torch::kFloat);
+	auto target = torch::from_blob((void*)&bbox, {1, 4}, torch::kFloat);
+
+	auto output = model->forward(data);
+	auto loss = torch::mse_loss(output, target);
+
+	auto shape = output.sizes();
+
+	auto access = output.accessor<float, 2>();
+	BBoxData out;
+	out.x0 = access[0][0];
+	out.y0 = access[0][1];
+	out.x1 = access[0][2];
+	out.y1 = access[0][3];
+	return make_pair(out, loss.item<float>());
+}
+
+
 
 int main(int argc, char** argv) {
 	ColorData* pixeldata = (ColorData*)malloc(sizeof(ColorData) * 256 * 256);
@@ -97,37 +128,102 @@ int main(int argc, char** argv) {
 	Model model;
 	torch::optim::SGD optimizer(model->parameters(), 0.01);
 
-	/*
 	Mat frame;
 	vector<BBoxData> boxes;
 
-	VideoCapture capture("assets/tracker3560.mp4");
-	BBoxReader reader("assets/tracker3560.bbox");
-	while (capture.isOpened()) {
-		capture.read(frame);
-		if (frame.empty()) break;
-		boxes.clear();
-		reader.Read(boxes);
+	auto task = [&](string fname) {
+		VideoCapture capture("assets/" + fname + ".mp4");
+		BBoxReader reader("assets/" + fname + ".bbox");
+		float loss = 0.0;
+		float frames = 0.0;
+		while (capture.isOpened()) {
+			capture.read(frame);
+			if (frame.empty()) break;
+			boxes.clear();
+			reader.Read(boxes);
 
-		//BBoxData prediction = train(model, optimizer, frame, bbox);
-		BBoxData& bbox = boxes[0];
-		Point p1(frame.cols * ((bbox.x0 + 1.0) / 2.0), frame.rows * ((-bbox.y0 + 1.0) / 2.0));
-		Point p2(frame.cols * ((bbox.x1 + 1.0) / 2.0), frame.rows * ((-bbox.y1 + 1.0) / 2.0));
-		rectangle(frame, p1, p2, Scalar(0, 256, 0), 2);
+			//BBoxData prediction = train(model, optimizer, frame, bbox);
+			BBoxData& bbox = boxes[0];
+			Point p1(frame.cols * ((bbox.x0 + 1.0) / 2.0), frame.rows * ((-bbox.y0 + 1.0) / 2.0));
+			Point p2(frame.cols * ((bbox.x1 + 1.0) / 2.0), frame.rows * ((-bbox.y1 + 1.0) / 2.0));
+			rectangle(frame, p1, p2, Scalar(0, 256, 0), 2);
 
-		BBoxData prediction = train(model, optimizer, frame, bbox);
-		Point p3(frame.cols * ((prediction.x0 + 1.0) / 2.0), frame.rows * ((-prediction.y0 + 1.0) / 2.0));
-		Point p4(frame.cols * ((prediction.x1 + 1.0) / 2.0), frame.rows * ((-prediction.y1 + 1.0) / 2.0));
-		rectangle(frame, p3, p4, Scalar(0, 0, 256), 2);
+			auto [prediction, l] = train(model, optimizer, frame, bbox);
+			Point p3(frame.cols * ((prediction.x0 + 1.0) / 2.0), frame.rows * ((-prediction.y0 + 1.0) / 2.0));
+			Point p4(frame.cols * ((prediction.x1 + 1.0) / 2.0), frame.rows * ((-prediction.y1 + 1.0) / 2.0));
+			rectangle(frame, p3, p4, Scalar(0, 0, 256), 2);
 
-		imshow("bbox", frame);
+			imshow("bbox", frame);
+			loss += l;
+			frames++;
 
-		int k = waitKey(1);
-		if (k == 27) {
-			break;
+			int k = waitKey(1);
+			if (k == 27) {
+				break;
+			}
 		}
-	}*/
 
+		cout << "loss: " << (loss / frames) << endl;
+	};
+
+	auto test_task = [&](string fname) {
+		VideoCapture capture("assets/" + fname + ".mp4");
+		BBoxReader reader("assets/" + fname + ".bbox");
+		float loss = 0.0;
+		float frames = 0.0;
+		while (capture.isOpened()) {
+			capture.read(frame);
+			if (frame.empty()) break;
+			boxes.clear();
+			reader.Read(boxes);
+
+			//BBoxData prediction = train(model, optimizer, frame, bbox);
+			BBoxData& bbox = boxes[0];
+			Point p1(frame.cols * ((bbox.x0 + 1.0) / 2.0), frame.rows * ((-bbox.y0 + 1.0) / 2.0));
+			Point p2(frame.cols * ((bbox.x1 + 1.0) / 2.0), frame.rows * ((-bbox.y1 + 1.0) / 2.0));
+			rectangle(frame, p1, p2, Scalar(0, 256, 0), 2);
+
+			auto [prediction, l] = test(model, frame, bbox);
+			Point p3(frame.cols * ((prediction.x0 + 1.0) / 2.0), frame.rows * ((-prediction.y0 + 1.0) / 2.0));
+			Point p4(frame.cols * ((prediction.x1 + 1.0) / 2.0), frame.rows * ((-prediction.y1 + 1.0) / 2.0));
+			rectangle(frame, p3, p4, Scalar(0, 0, 256), 2);
+
+			imshow("bbox", frame);
+			loss += l;
+			frames++;
+
+			int k = waitKey(1);
+			if (k == 27) {
+				break;
+			}
+		}
+
+		cout << "loss: " << (loss / frames) << endl;
+	};
+
+
+	vector<string> training_data;
+	const filesystem::path assets("assets");
+	for (auto& entry : filesystem::directory_iterator(assets)) {
+		string fname = entry.path().stem().string();
+		training_data.push_back(fname);
+	}
+
+    random_device rd;
+    mt19937 g(rd());
+
+	shuffle(training_data.begin(), training_data.end(), g);
+	for (auto& fname : training_data) {
+		task(fname);
+	}
+
+	cout << "\n\n\n";
+
+	for (auto& entry : filesystem::directory_iterator(assets)) {
+		string fname = entry.path().stem().string();
+		test_task(fname);
+	}
+#if 0
 	CreateVisionThread();
 	for (int j = 0; j < 5; j++) {
 		FrameData data = {};
@@ -147,4 +243,5 @@ int main(int argc, char** argv) {
 		VisionThreadStop();
 	}
 	DestroyVisionThread();
+#endif
 }
