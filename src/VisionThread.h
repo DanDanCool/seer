@@ -35,9 +35,8 @@ class VisionThread;
 
 SEER_API int SEERTestLoadFunction(int in);
 
-SEER_API VisionThread* CreateVisionThread();
-SEER_API void DestroyVisionThread(VisionThread* t);
-SEER_API void VisionThreadUpdate(VisionThread* t, FrameData* data);
-SEER_API void VisionThreadRun(VisionThread* t, FrameData* data);
-SEER_API void VisionThreadStop(VisionThread* t);
-SEER_API void VisionThreadAwait(VisionThread* t);
+SEER_API void CreateVisionThread();
+SEER_API void DestroyVisionThread();
+SEER_API void VisionThreadUpdate(FrameData* data);
+SEER_API void VisionThreadRun(FrameData* data);
+SEER_API void VisionThreadStop();

@@ -23,7 +23,5 @@ public:
 
 private:
 	using BufType = TArray<FColor>;
-
-	VisionThread* _Thread;
 	bool _Run;
 };

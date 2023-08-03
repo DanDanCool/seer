@@ -97,6 +97,7 @@ int main(int argc, char** argv) {
 	Model model;
 	torch::optim::SGD optimizer(model->parameters(), 0.01);
 
+	/*
 	Mat frame;
 	vector<BBoxData> boxes;
 
@@ -125,12 +126,10 @@ int main(int argc, char** argv) {
 		if (k == 27) {
 			break;
 		}
-	}
+	}*/
 
-	/*
-	for (int j = 0; j < 1; j++) {
-		VisionThread* thread = CreateVisionThread();
-
+	CreateVisionThread();
+	for (int j = 0; j < 5; j++) {
 		FrameData data = {};
 		data.cdata = pixeldata;
 		data.bdata = &bbox;
@@ -139,11 +138,13 @@ int main(int argc, char** argv) {
 		data.fw = 256;
 		data.fh = 256;
 
-		VisionThreadRun(thread, &data);
+		Sleep(10);
+		VisionThreadRun(&data);
 		for (int i = 0; i < 100; i++) {
-			VisionThreadUpdate(thread, &data);
+			VisionThreadUpdate(&data);
 			Sleep(10);
 		}
-		DestroyVisionThread(thread);
-	}*/
+		VisionThreadStop();
+	}
+	DestroyVisionThread();
 }

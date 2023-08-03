@@ -39,10 +39,13 @@ void FseerModule::StartupModule()
 	if (!ok) {
 		FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("ThirdPartyLibraryError", "Failed to load example third party library"));
 	}
+
+	CreateVisionThread();
 }
 
 void FseerModule::ShutdownModule()
 {
+	DestroyVisionThread();
 	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
 	// we call this function before unloading the module.
 

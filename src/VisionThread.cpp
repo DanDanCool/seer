@@ -8,16 +8,24 @@
 #include <cstdint>
 #include <immintrin.h>
 
+static VisionThread* g_VisionThread = nullptr;
+
 class VisionThread {
 public:
-	VisionThread() {
+	VisionThread() : _Signal(1) {
 		_Run.store(false, std::memory_order_relaxed);
 		_Finished.store(false, std::memory_order_relaxed);
 	}
 
 	~VisionThread() {
-		Stop();
-		Await();
+		_Finished.store(true, std::memory_order_release);
+		_Signal.Release();
+		_Thread.join();
+	}
+
+	void RunThread() {
+		auto task = [](VisionThread* ctx) { ctx->Task(); };
+		_Thread = std::thread(task, this);
 	}
 
 	void NextFrame(FrameData* data) {
@@ -32,8 +40,7 @@ public:
 
 		ReadData(data);
 
-		auto task = [](VisionThread* ctx) { ctx->Task(); };
-		_Thread = std::thread(task, this);
+		_Signal.Release();
 	}
 
 	void Stop() {
@@ -41,19 +48,13 @@ public:
 		_Run.store(false, std::memory_order_release);
 	}
 
-	void Await() {
-		bool finished = _Finished.load(std::memory_order_acquire);
-		if (!finished) {
-			_Thread.join();
-		}
-	}
-
-private:
 	void Task();
 	void ReadData(FrameData* data);
 
+private:
 	std::thread _Thread;
 
+	Semaphore _Signal;
 	Swapchain _Swapchain;
 
 	int _Size;
@@ -63,29 +64,27 @@ private:
 	std::string _Window;
 };
 
-
-VisionThread* CreateVisionThread() {
-	return new VisionThread();
+void CreateVisionThread() {
+	if (g_VisionThread) return;
+	g_VisionThread = new VisionThread();
+	g_VisionThread->RunThread();
 }
 
-void DestroyVisionThread(VisionThread* t) {
-	delete t;
+void DestroyVisionThread() {
+	delete g_VisionThread;
+	g_VisionThread = nullptr;
 }
 
-void VisionThreadUpdate(VisionThread* t, FrameData* data) {
-	return t->NextFrame(data);
+void VisionThreadUpdate(FrameData* data) {
+	return g_VisionThread->NextFrame(data);
 }
 
-void VisionThreadRun(VisionThread* t, FrameData* data) {
-	t->Run(data);
+void VisionThreadRun(FrameData* data) {
+	g_VisionThread->Run(data);
 }
 
-void VisionThreadStop(VisionThread* t) {
-	t->Stop();
-}
-
-void VisionThreadAwait(VisionThread* t) {
-	t->Await();
+void VisionThreadStop() {
+	g_VisionThread->Stop();
 }
 
 #include <opencv2/tracking.hpp>
@@ -93,6 +92,8 @@ void VisionThreadAwait(VisionThread* t) {
 #include <opencv2/video/tracking.hpp>
 #include <opencv2/core/ocl.hpp>
 #include <sstream>
+#include <chrono>
+#include <iomanip>
 
 int SEERTestLoadFunction(int in) {
 	return 7;
@@ -102,58 +103,49 @@ using namespace std;
 using namespace cv;
 
 void VisionThread::Task() {
-	stringstream str;
-	str << "tracker" << _Thread.get_id();
-	_Window = str.str();
-
-	bool run = _Run.load(memory_order_relaxed);
-
-	double timer = (double)getTickCount();
-	RNG rng;
-	Scalar color(Scalar(rng.uniform(0, 256), rng.uniform(0, 256), rng.uniform(0, 256)));
-
-	string save_directory = "C:\\Users\\sunda\\Documents\\dev\\seer\\assets\\";
-	VideoWriter writer(save_directory + _Window + ".mp4", VideoWriter::fourcc('H', '2', '6', '4'), 60, {_Swapchain.Width, _Swapchain.Height});
-	BBoxWriter bwriter(save_directory + _Window + ".bbox");
-	while (run) {
-		double now = (double)getTickCount();
+	auto task = [&]() {
 		{
-			auto& f = _Swapchain.Present();
-			std::lock_guard l(f.lock);
-
-			auto& frame = f.frame;
-
-			writer.write(frame);
-			bwriter.Write(f.bbox);
-
-			/*
-			if (!f.bbox.empty()) {
-				auto& bbox = f.bbox[0];
-				Point p1(frame.cols * ((bbox.x0 + 1.0) / 2.0), frame.rows * ((-bbox.y0 + 1.0) / 2.0));
-				Point p2(frame.cols * ((bbox.x1 + 1.0) / 2.0), frame.rows * ((-bbox.y1 + 1.0) / 2.0));
-				rectangle(frame, p1, p2, color, 1);
-			}
-
-			float fps = getTickFrequency() / (now - timer);
-			putText(frame, "FPS : " + to_string((int)fps), Point(100, 20), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(50, 170, 50), 2);
-			*/
-			imshow(_Window, frame);
-
-			// Exit if ESC pressed.
-			int k = waitKey(1);
-			if (k == 27) {
-				Stop();
-			}
+			auto now = time(nullptr);
+			auto tm = *localtime(&now);
+			stringstream str;
+			str << put_time(&tm, "%F-%H-%M-%S");
+			_Window = str.str();
 		}
 
-		timer = now;
-		run = _Run.load(memory_order_acquire);
-		_Swapchain.SwapBuffers();
-	}
+		bool run = _Run.load(memory_order_relaxed);
 
-	writer.release();
-	destroyWindow(_Window);
-	_Finished.store(true, std::memory_order_release);
+		string save_directory = "C:\\Users\\sunda\\Documents\\dev\\seer\\assets\\";
+		VideoWriter writer(save_directory + _Window + ".mp4", VideoWriter::fourcc('H', '2', '6', '4'), 60, {_Swapchain.Width, _Swapchain.Height});
+		BBoxWriter bwriter(save_directory + _Window + ".bbox");
+		while (run) {
+			double now = (double)getTickCount();
+			{
+				auto& f = _Swapchain.Present();
+				std::lock_guard l(f.lock);
+
+				writer.write(f.frame);
+				bwriter.Write(f.bbox);
+				imshow(_Window, f.frame);
+
+				// Exit if ESC pressed.
+				int k = waitKey(1);
+				if (k == 27) Stop();
+			}
+
+			run = _Run.load(memory_order_acquire);
+			_Swapchain.SwapBuffers();
+		}
+
+		writer.release();
+		destroyWindow(_Window);
+	};
+
+	bool finished = _Finished.load(std::memory_order_acquire);
+	while (!finished) {
+		_Signal.Acquire();
+		finished = _Finished.load(std::memory_order_acquire);
+		if (!finished) task();
+	}
 }
 
 void VisionThread::ReadData(FrameData* data) {

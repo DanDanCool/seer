@@ -48,11 +48,6 @@ if (MSVC)
   cmake_path(SET PLUGIN_PATH "${CMAKE_CURRENT_SOURCE_DIR}/image_gen/Plugins/seer/Binaries/ThirdParty/Win64")
 
   add_custom_command(TARGET ${LIBRARY} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SEER_DLLS} ${PLUGIN_PATH})
-
-  cmake_path(SET ASSET_PATH "${CMAKE_CURRENT_BINARY_DIR}/assets")
-  file(GLOB ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/assets/*")
-  add_custom_command(TARGET ${EXECUTABLE} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ASSETS}
-	  ${ASSET_PATH})
 endif (MSVC)
 
 execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/assets)
